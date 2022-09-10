@@ -5,6 +5,7 @@
 #include <WiFiClientSecure.h>
 #include <Wire.h>
 
+// WiFiのパスワードとか証明書とか入れておく場所
 #include "env.h"
 
 static M5GFX lcd;
