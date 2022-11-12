@@ -30,6 +30,10 @@ const char *WTSUKUMIJIMA_HOST = "weather.tsukumijima.net";
 const String WTSUKUMIJIMA_PATH_TO_TOKYO_SUBAREA =
     "/api/forecast/city/" + TOKYO_SUBAREA_CODE;
 
+const char *GIST_HOST = "gist.githubusercontent.com";
+const String GIST_PATH = "/Osmium1008/c9fd98858b893f732a1f865196f7ada1/raw/"
+                         "2-1.txt";
+
 const int HTTPS_PORT = 443;
 
 String httpsGet(int port, const char *cert, const char *host,
@@ -39,7 +43,7 @@ String httpsGet(int port, const char *cert, const char *host,
   WiFiClientSecure client;
   client.setCACert(cert);
 
-  Serial.println("connect to" + String(host));
+  Serial.println("connect to " + String(host));
 
   int tl = millis();
   while (!client.connect(host, port)) {
@@ -68,6 +72,10 @@ joi:;
   return res;
 }
 
+String Timetable[6][6];
+
+const int JST = 3600 * 9;
+
 void setup() {
   Serial.begin(115200);
   Serial.println("Hello World!!");
@@ -79,51 +87,76 @@ void setup() {
   lcd.setCursor(0, 30);
   lcd.println("Hello World!!");
 
+  Serial.print("Connecting to ");
+  Serial.println(SSID);
+
   WiFi.begin(SSID, PASSWORD);
   while (WiFi.status() != WL_CONNECTED) {
-    lcd.print('.');
+    Serial.print('.');
     delay(1000);
   }
-  lcd.printf("\nConnected\n");
+  Serial.printf("\nConnected\n");
+
+  configTime(JST, 0, "ntp.nict.jp");
+
+  String res2 = httpsGet(HTTPS_PORT, DIGICERT_ROOT_CA, GIST_HOST, GIST_PATH);
+  String body2 = res2.substring(res2.indexOf("\r\n\r\n") + 4);
+
+  time_t t;
+  time(&t);
+  struct tm *tm;
+  tm = localtime(&t);
+
+  for (int i = 0; i < tm->tm_wday - 1; i++)
+    body2 = body2.substring(body2.indexOf("\n") + 1);
+
+  lcd.println(body2.substring(0, body2.indexOf("\n")));
 
   String res = httpsGet(HTTPS_PORT, ISRG_ROOT_X1, WTSUKUMIJIMA_HOST,
                         WTSUKUMIJIMA_PATH_TO_TOKYO_SUBAREA);
   String body = res.substring(res.indexOf("\r\n\r\n") + 4);
 
-  lcd.fillRect(0, 60, 200, 200, 0x000000U);
-  lcd.setCursor(0, 60);
+  // lcd.fillRect(0, 60, 200, 200, 0x000000U);
+  // lcd.setCursor(0, 60);
 
-  DynamicJsonDocument doc(4096);
+  DynamicJsonDocument doc(8192);
   deserializeJson(doc, body);
+  Serial.println(body);
+
   const char *public_time = doc["publicTime"];
   Serial.println(String(public_time));
 
   const char *forecast = doc["forecasts"][0]["telop"];
   const char *tmax = doc["forecasts"][0]["temperature"]["max"]["celsius"];
-
   lcd.println("今日の天気: " + String(forecast));
-  lcd.printf("最高気温: %s℃\n", tmax);
+  if (String(tmax).length() != 0) {
+    lcd.print("最高気温: ");
+    lcd.print(tmax);
+    lcd.println("℃");
+  } else {
+    lcd.println("最高気温情報は現在取得できていません。");
+  }
 
-  pinMode(RLED_PIN, OUTPUT);
-  pinMode(GLED_PIN, OUTPUT);
-  pinMode(BLED_PIN, OUTPUT);
+  // pinMode(RLED_PIN, OUTPUT);
+  // pinMode(GLED_PIN, OUTPUT);
+  // pinMode(BLED_PIN, OUTPUT);
 
   // I2C初期化 マスターになるらしい
-  Wire.begin();
+  // Wire.begin();
 }
 
 void loop() {
   // ディスプレイを一度クリア
-  lcd.fillRect(0, 120, 200, 200, 0x000000U);
-  lcd.setCursor(0, 120);
+  // lcd.fillRect(0, 120, 200, 200, 0x000000U);
+  // lcd.setCursor(0, 120);
 
   // LEDを消灯 HIGHが消灯
-  digitalWrite(RLED_PIN, HIGH);
-  digitalWrite(GLED_PIN, HIGH);
-  digitalWrite(BLED_PIN, HIGH);
+  // digitalWrite(RLED_PIN, HIGH);
+  // digitalWrite(GLED_PIN, HIGH);
+  // digitalWrite(BLED_PIN, HIGH);
 
   // 読み出したいアドレスをセンサーに送信
-  Wire.beginTransmission(SENSOR_ADDR);
+  /*Wire.beginTransmission(SENSOR_ADDR);
   Wire.write(DISTANCE_ADDR);
   int ans = Wire.endTransmission();
 
@@ -155,6 +188,7 @@ void loop() {
     } else {
       digitalWrite(BLED_PIN, LOW);
     }
-  }
+  }*/
+
   delay(500);
 }
