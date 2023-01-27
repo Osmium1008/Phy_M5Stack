@@ -1,194 +1,152 @@
 #include <M5Stack.h>
 
-#include <ArduinoJson.h>
-#include <M5GFX.h>
-#include <WiFiClientSecure.h>
-#include <Wire.h>
+#include <BluetoothSerial.h>
+#include <SPI.h>
+#include <WiFi.h>
 
 // WiFiのパスワードとか証明書とか入れておく場所
 #include "env.h"
 
-static M5GFX lcd;
-// 仕様書によるとデフォルトでセンサーのスレーブアドレスが
-// (上7bit 0x40) + (write 0/read 1)らしいので
-constexpr uint16_t SENSOR_ADDR = 0x40;
-// 仕様書によると距離のデータは 0x5E,0x5F の2バイトに乗っているらしいので
-constexpr uint16_t DISTANCE_ADDR = 0x5E;
+char pattern[] = {
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+};
 
-constexpr uint8_t RLED_PIN = 1, GLED_PIN = 3, BLED_PIN = 17;
+const int OE=5,DYNA=1,DYNB=3,DATA=22,LATCH=2,CLK=21,SSp=16,MI=17;
 
-const String TOKYO_AREA_CODE = "130000";
-const String TOKYO_SUBAREA_CODE = "130010";
-
-// JMA(気象庁): DIGICERT
-const char *JMA_HOST = "www.jma.go.jp";
-const String JMA_PATH_TO_TOKYO_AREA =
-    "/bosai/forecast/data/forecast/" + TOKYO_AREA_CODE + ".json";
-
-// 天気予報 API（livedoor 天気互換）: ISRG(Let's Encrypt)
-const char *WTSUKUMIJIMA_HOST = "weather.tsukumijima.net";
-const String WTSUKUMIJIMA_PATH_TO_TOKYO_SUBAREA =
-    "/api/forecast/city/" + TOKYO_SUBAREA_CODE;
-
-const char *GIST_HOST = "gist.githubusercontent.com";
-const String GIST_PATH = "/Osmium1008/c9fd98858b893f732a1f865196f7ada1/raw/"
-                         "2-1.txt";
-
-const int HTTPS_PORT = 443;
-
-String httpsGet(int port, const char *cert, const char *host,
-                const String &path) {
-  String res;
-
-  WiFiClientSecure client;
-  client.setCACert(cert);
-
-  Serial.println("connect to " + String(host));
-
-  int tl = millis();
-  while (!client.connect(host, port)) {
-    if (millis() > tl + 30000) {
-      Serial.println("connection failed");
-      goto joi;
-    }
-  }
-  {
-    Serial.println("Connected to server");
-
-    client.println("GET " + path + " HTTP/1.1");
-    client.println("HOST: " + String(host));
-    client.println("Connection: close");
-    client.println();
-
-    if (!client) {
-      res = "error";
-    } else {
-      res = client.readString();
-    }
-    client.readString();
-    client.stop();
-  }
-joi:;
-  return res;
-}
-
-String Timetable[6][6];
+SPIClass hspi(HSPI);
 
 const int JST = 3600 * 9;
 
+void write_num(String filename, int bx, int by){
+  SD.begin();
+  File f = SD.open(String("/")+filename+".txt");
+    if(f){
+      int sz=f.size();
+      int x=bx,y=by;
+      for(int j=0;j<sz;j++){
+        f.seek(j);
+        char buf=f.read();
+
+        if(buf=='\n'){
+          y++;
+          x=bx;
+        }
+        else if(buf!='\r'){
+          pattern[x+y*32]=buf-'0';
+          x++;
+        }
+      }
+      f.close();
+    }
+}
+
+void task0(void* arg) {
+  while(true){
+
+  for ( int i = 0; i < 4; i++) {
+
+    for ( int j = 0; j < 16; j++ ){
+      char s = 255;
+      for (int k = 0; k < 8; k++) {
+        s = s - (pattern[ i * 32 + ( (15 - j) % 4) * 128 + (j >> 2 ) * 8 + k] << k);
+      }
+      hspi.transfer(s);
+    }
+
+    digitalWrite(OE, LOW);           // パネル消灯
+    digitalWrite(DYNA, i & 1 );      // ダイナミック点灯桁指定(LOW)
+    digitalWrite(DYNB, i >> 1 & 1 ); // ダイナミック点灯桁指定(HIGH)
+    digitalWrite(LATCH, HIGH);       // ラッチ解除
+    digitalWrite(OE, HIGH);          // パネル点灯
+    digitalWrite(LATCH, LOW);        // ラッチ
+
+    delay(3) ;            // 3msウェイト
+  }
+  }
+}
+
 void setup() {
+  M5.begin();
   Serial.begin(115200);
-  Serial.println("Hello World!!");
 
-  // ディスプレイを使う
-  lcd.init();
-  lcd.setFont(&fonts::lgfxJapanGothic_28);
-  lcd.setBrightness(128);
-  lcd.setCursor(0, 30);
-  lcd.println("Hello World!!");
-
-  Serial.print("Connecting to ");
-  Serial.println(SSID);
+  while(!(M5.BtnA.read() || M5.BtnB.read()));
+  const char *SSID;
+  const char *PASSWORD;
+  if(M5.BtnA.wasPressed()){
+    SSID=SSID_HOME;
+    PASSWORD=PASSWORD_HOME;
+  }
+  else{
+    SSID=SSID_PHYS;
+    PASSWORD=PASSWORD_PHYS;
+  }
 
   WiFi.begin(SSID, PASSWORD);
   while (WiFi.status() != WL_CONNECTED) {
-    Serial.print('.');
-    delay(1000);
+		delay(500);
   }
-  Serial.printf("\nConnected\n");
+  
+  configTime(JST, 0, "ntp.nict.jp", "ntp.jst.mfeed.ad.jp");
+    
 
-  configTime(JST, 0, "ntp.nict.jp");
+  delay(200);
 
-  String res2 = httpsGet(HTTPS_PORT, DIGICERT_ROOT_CA, GIST_HOST, GIST_PATH);
-  String body2 = res2.substring(res2.indexOf("\r\n\r\n") + 4);
+  pinMode(LATCH, OUTPUT);
+  pinMode(CLK, OUTPUT);
+  pinMode(DATA, OUTPUT);
+  pinMode(DYNA, OUTPUT);
+  pinMode(DYNB, OUTPUT);
+  pinMode(OE, OUTPUT);
+
+  hspi.begin(CLK,MI,DATA,SSp);
+  hspi.setBitOrder(LSBFIRST);
+  hspi.setClockDivider(SPI_CLOCK_DIV2);
+  hspi.setDataMode(SPI_MODE0);
+  digitalWrite(LATCH, LOW);
+  
+  delay(20000);
 
   time_t t;
   time(&t);
-  struct tm *tm;
-  tm = localtime(&t);
+  struct tm *tm_now;
+  tm_now = localtime(&t);
 
-  for (int i = 0; i < tm->tm_wday - 1; i++)
-    body2 = body2.substring(body2.indexOf("\n") + 1);
+  int month = tm_now->tm_mon+1,day=tm_now->tm_mday;
 
-  lcd.println(body2.substring(0, body2.indexOf("\n")));
+  write_num(String(month/10),0,0);
+  write_num(String(month%10),4,0);
+  write_num(String(day/10),0,6);
+  write_num(String(day%10),4,6);
 
-  String res = httpsGet(HTTPS_PORT, ISRG_ROOT_X1, WTSUKUMIJIMA_HOST,
-                        WTSUKUMIJIMA_PATH_TO_TOKYO_SUBAREA);
-  String body = res.substring(res.indexOf("\r\n\r\n") + 4);
+  write_num("sunny",16,0);
 
-  // lcd.fillRect(0, 60, 200, 200, 0x000000U);
-  // lcd.setCursor(0, 60);
-
-  DynamicJsonDocument doc(8192);
-  deserializeJson(doc, body);
-  Serial.println(body);
-
-  const char *public_time = doc["publicTime"];
-  Serial.println(String(public_time));
-
-  const char *forecast = doc["forecasts"][0]["telop"];
-  const char *tmax = doc["forecasts"][0]["temperature"]["max"]["celsius"];
-  lcd.println("今日の天気: " + String(forecast));
-  if (String(tmax).length() != 0) {
-    lcd.print("最高気温: ");
-    lcd.print(tmax);
-    lcd.println("℃");
-  } else {
-    lcd.println("最高気温情報は現在取得できていません。");
-  }
-
-  // pinMode(RLED_PIN, OUTPUT);
-  // pinMode(GLED_PIN, OUTPUT);
-  // pinMode(BLED_PIN, OUTPUT);
-
-  // I2C初期化 マスターになるらしい
-  // Wire.begin();
+  delay(200);
+  xTaskCreatePinnedToCore(task0, "Task0", 4096, NULL, 1, NULL, 1);
 }
 
+
 void loop() {
-  // ディスプレイを一度クリア
-  // lcd.fillRect(0, 120, 200, 200, 0x000000U);
-  // lcd.setCursor(0, 120);
-
-  // LEDを消灯 HIGHが消灯
-  // digitalWrite(RLED_PIN, HIGH);
-  // digitalWrite(GLED_PIN, HIGH);
-  // digitalWrite(BLED_PIN, HIGH);
-
-  // 読み出したいアドレスをセンサーに送信
-  /*Wire.beginTransmission(SENSOR_ADDR);
-  Wire.write(DISTANCE_ADDR);
-  int ans = Wire.endTransmission();
-
-  if (ans) {
-    Serial.printf("ERR No.%d\n", ans);
-
-    //エラーあったら白で点灯 LOWが点灯
-    digitalWrite(RLED_PIN, LOW);
-    digitalWrite(GLED_PIN, LOW);
-    digitalWrite(BLED_PIN, LOW);
-  } else {
-    uint8_t c[2];
-
-    // センサーから指定したアドレスに乗ってるデータを貰う 2は2バイトの2
-    Wire.requestFrom(SENSOR_ADDR, 2);
-    c[0] = Wire.read();
-    c[1] = Wire.read();
-    Wire.endTransmission();
-
-    // 距離を出してディスプレイに表示
-    int dist = ((c[0] << 4) + c[1]) / 16 / 4;
-    lcd.printf("distance: %dcm\n", dist);
-
-    // 対応する色を点灯 LOWで点灯
-    if (dist == 63) {
-      digitalWrite(RLED_PIN, LOW);
-    } else if (dist > 20) {
-      digitalWrite(GLED_PIN, LOW);
-    } else {
-      digitalWrite(BLED_PIN, LOW);
-    }
-  }*/
-
-  delay(500);
+  delay(1000);
+  write_num("rainy",16,0);
+  delay(1000);
+  write_num("snow",16,0);
+  delay(1000);
+  write_num("cloudy",16,0);
+  delay(1000);
+  write_num("sunny",16,0);
 }
