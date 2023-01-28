@@ -1,6 +1,5 @@
 #include <M5Stack.h>
 
-#include <BluetoothSerial.h>
 #include <SPI.h>
 #include <WiFi.h>
 
@@ -32,6 +31,8 @@ SPIClass hspi(HSPI);
 
 const int JST = 3600 * 9;
 
+bool is_spi_initialized=false;
+
 void write_num(String filename, int bx, int by){
   SD.begin();
   File f = SD.open(String("/")+filename+".txt");
@@ -55,7 +56,24 @@ void write_num(String filename, int bx, int by){
     }
 }
 
-void task0(void* arg) {
+void display_on_matrix(void* arg) {
+  if(!is_spi_initialized){
+    pinMode(LATCH, OUTPUT);
+    pinMode(CLK, OUTPUT);
+    pinMode(DATA, OUTPUT);
+    pinMode(DYNA, OUTPUT);
+    pinMode(DYNB, OUTPUT);
+    pinMode(OE, OUTPUT);
+
+    hspi.begin(CLK,MI,DATA,SSp);
+    hspi.setBitOrder(LSBFIRST);
+    hspi.setClockDivider(SPI_CLOCK_DIV2);
+    hspi.setDataMode(SPI_MODE0);
+    digitalWrite(LATCH, LOW);
+    is_spi_initialized = true;
+  }
+  delay(200);
+
   while(true){
 
   for ( int i = 0; i < 4; i++) {
@@ -102,22 +120,10 @@ void setup() {
   }
   
   configTime(JST, 0, "ntp.nict.jp", "ntp.jst.mfeed.ad.jp");
-    
-
-  delay(200);
-
-  pinMode(LATCH, OUTPUT);
-  pinMode(CLK, OUTPUT);
-  pinMode(DATA, OUTPUT);
-  pinMode(DYNA, OUTPUT);
-  pinMode(DYNB, OUTPUT);
-  pinMode(OE, OUTPUT);
-
-  hspi.begin(CLK,MI,DATA,SSp);
-  hspi.setBitOrder(LSBFIRST);
-  hspi.setClockDivider(SPI_CLOCK_DIV2);
-  hspi.setDataMode(SPI_MODE0);
-  digitalWrite(LATCH, LOW);
+  
+  M5.Lcd.fillScreen(BLACK);
+  M5.Lcd.setTextSize(2);
+  M5.Lcd.println(WiFi.macAddress());
   
   delay(20000);
 
@@ -136,7 +142,7 @@ void setup() {
   write_num("sunny",16,0);
 
   delay(200);
-  xTaskCreatePinnedToCore(task0, "Task0", 4096, NULL, 1, NULL, 1);
+  xTaskCreatePinnedToCore(display_on_matrix, "Task0", 4096, NULL, 1, NULL, 1);
 }
 
 
